@@ -1,5 +1,6 @@
 import os
 import socket
+import threading
 from configs import Config, DefaultConfig
 from threading import Thread
 from utils import DataQueue, FrameDict, SlidingWindow, create_folder
@@ -7,6 +8,8 @@ import subprocess
 import cv2
 import numpy as np
 received_num = 0
+con = threading.Condition()
+yuv_num = 0
 
 
 class DataManagement(Thread):
@@ -18,13 +21,24 @@ class DataManagement(Thread):
     def run(self) -> None:
         global if_trans_finished
         global received_num
+        global con
         while True:
+            con.acquire()
+            # print("data: ", con)
             seq, data = data_queue.get()
             if if_trans_finished and received_num >= self.max_received_num:
+                con.release()
+                # print("data: released", con)
                 break
             if data is None:
+                # print("data: waiting", con)
+                con.wait()
+                con.release()
+                # print("data: waiting over", con)
                 continue
             received_num += 1
+            con.release()
+            # print("data: released", con)
             self.yuv2bgr(seq, data, self.config.data_frame_width, self.config.data_frame_height, 0)
 
     def yuv2bgr(self, seq, file_name, width, height, start_frame=0):
@@ -33,7 +47,6 @@ class DataManagement(Thread):
             frame_size = height * width * 3 // 2  # 一帧图像所含的像素个数
             h_h = height // 2
             h_w = width // 2
-
             fp.seek(0, 2)  # 设置文件指针到文件流的尾部
             ps = fp.tell()  # 当前文件指针位置
             num_frame = ps // frame_size  # 计算输出帧数
@@ -73,9 +86,9 @@ class SocketService(Thread):
         self.exe_path = os.path.join(os.getcwd(), self.data_config.data_decode_exe_path)
         create_folder(self.saved_dir)
         create_folder(self.output_dir)
-        # 初始化socket属性
 
     def run(self):
+        global con
         while True:
             self.sk = socket.socket()
             self.sk.connect((self.server_config.ip, self.server_config.port))
@@ -105,7 +118,13 @@ class SocketService(Thread):
                       + " -o " + os.path.join(self.output_dir, str(info['seq']) + '.yuv')
             p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE)
             p.communicate()
+            con.acquire()
+            # print("socket: acquired", con)
             data_queue.put(info['seq'], os.path.join(self.output_dir, str(info['seq']) + '.yuv'))
+            con.notify_all()
+            # print("socket: notified", con)
+            con.release()
+            # print("socket: released", con)
 
 
 def main():
