@@ -3,13 +3,12 @@ import socket
 import threading
 from configs import Config, DefaultConfig
 from threading import Thread
-from utils import DataQueue, FrameDict, SlidingWindow, create_folder
+from utils import DataQueue, FrameDict, SlidingWindow, create_folder, send_msg_no_recv, YUV2RGB
 import subprocess
-import cv2
 import numpy as np
+
 received_num = 0
 con = threading.Condition()
-yuv_num = 0
 
 
 class DataManagement(Thread):
@@ -17,6 +16,11 @@ class DataManagement(Thread):
         super(DataManagement, self).__init__()
         self.config = Config.data_received_config
         self.max_received_num = size
+        self.h_h, self.h_w = self.config.data_frame_height // 2, self.config.data_frame_width // 2
+        self.Yt = np.zeros(shape=(self.config.data_frame_height, self.config.data_frame_width), dtype='uint8',
+                           order='C')
+        self.Ut = np.zeros(shape=(self.h_h, self.h_w), dtype='uint8', order='C')
+        self.Vt = np.zeros(shape=(self.h_h, self.h_w), dtype='uint8', order='C')
 
     def run(self) -> None:
         global if_trans_finished
@@ -24,54 +28,53 @@ class DataManagement(Thread):
         global con
         while True:
             con.acquire()
-            # print("data: ", con)
             seq, data = data_queue.get()
             if if_trans_finished and received_num >= self.max_received_num:
                 con.release()
-                # print("data: released", con)
                 break
             if data is None:
-                # print("data: waiting", con)
                 con.wait()
                 con.release()
-                # print("data: waiting over", con)
                 continue
             received_num += 1
             con.release()
-            # print("data: released", con)
-            self.yuv2bgr(seq, data, self.config.data_frame_width, self.config.data_frame_height, 0)
+            self.yuv2bgr(seq, data)
 
-    def yuv2bgr(self, seq, file_name, width, height, start_frame=0):
+    def from_I420(self, yuv_data, frames):
+        Y = np.zeros((frames, self.config.data_frame_height, self.config.data_frame_width), dtype=np.uint8)
+        U = np.zeros((frames, int(self.config.data_frame_height / 2), int(self.config.data_frame_width / 2)), dtype=np.uint8)
+        V = np.zeros((frames, int(self.config.data_frame_height / 2), int(self.config.data_frame_width / 2)), dtype=np.uint8)
+
+        for frame_idx in range(0, frames):
+            y_start = frame_idx * self.config.video_image_size
+            u_start = y_start + self.config.data_frame_height * self.config.data_frame_width
+            v_start = u_start + int(self.config.data_frame_height * self.config.data_frame_width / 4)
+            v_end = v_start + int(self.config.data_frame_height * self.config.data_frame_width / 4)
+
+            Y[frame_idx, :, :] = yuv_data[y_start: u_start].reshape(
+                (self.config.data_frame_height, self.config.data_frame_width))
+            U[frame_idx, :, :] = yuv_data[u_start: v_start].reshape(
+                (int(self.config.data_frame_height / 2), int(self.config.data_frame_width / 2)))
+            V[frame_idx, :, :] = yuv_data[v_start: v_end].reshape(
+                (int(self.config.data_frame_height / 2), int(self.config.data_frame_width / 2)))
+        return Y, U, V
+
+    def yuv2bgr(self, seq, file_name):
+        """
+        :param seq: yuv文件序号
+        :param file_name: yuv文件路径
+        :return: None
+        """
         imgs = []
-        with open(file_name, 'rb') as fp:
-            frame_size = height * width * 3 // 2  # 一帧图像所含的像素个数
-            h_h = height // 2
-            h_w = width // 2
-            fp.seek(0, 2)  # 设置文件指针到文件流的尾部
-            ps = fp.tell()  # 当前文件指针位置
-            num_frame = ps // frame_size  # 计算输出帧数
-            fp.seek(frame_size * start_frame, 0)
-            for i in range(num_frame - start_frame):
-                Yt = np.zeros(shape=(height, width), dtype='uint8', order='C')
-                Ut = np.zeros(shape=(h_h, h_w), dtype='uint8', order='C')
-                Vt = np.zeros(shape=(h_h, h_w), dtype='uint8', order='C')
-
-                for m in range(height):
-                    for n in range(width):
-                        Yt[m, n] = ord(fp.read(1))
-                for m in range(h_h):
-                    for n in range(h_w):
-                        Ut[m, n] = ord(fp.read(1))
-                for m in range(h_h):
-                    for n in range(h_w):
-                        Vt[m, n] = ord(fp.read(1))
-
-                img = np.concatenate((Yt.reshape(-1), Vt.reshape(-1), Ut.reshape(-1)))
-                img = img.reshape((height * 3 // 2, width)).astype('uint8')
-                bgr_img = cv2.cvtColor(img, cv2.COLOR_YUV2BGR_YV12)
-                imgs.append(bgr_img)
-            for i, img in enumerate(imgs):
-                frame_dict.put((seq-1) * self.config.data_frame_per_yuv + i + 1, img)
+        with open(file_name, 'rb') as f:
+            data = np.frombuffer(f.read(), np.uint8)
+        Y, U, V = self.from_I420(data, self.config.data_frame_per_yuv)
+        for frame_idx in range(self.config.data_frame_per_yuv):
+            bgr_data = YUV2RGB(Y[frame_idx, :, :], U[frame_idx, :, :], V[frame_idx, :, :], self.config.data_frame_height, self.config.data_frame_width)           # numpy
+            if bgr_data is not None:
+                imgs.append(bgr_data)
+        for i, img in enumerate(imgs):
+            frame_dict.put((seq - 1) * self.config.data_frame_per_yuv + i + 1, img)
 
 
 class SocketService(Thread):
@@ -81,50 +84,58 @@ class SocketService(Thread):
         self.client_config = config.client_config
         self.data_config = config.data_received_config
         self.server_config = config.server_config
-        self.saved_dir = os.path.join(os.getcwd(), self.data_config.data_saved_path)
-        self.output_dir = os.path.join(os.getcwd(), self.data_config.data_output_path)
-        self.exe_path = os.path.join(os.getcwd(), self.data_config.data_decode_exe_path)
-        create_folder(self.saved_dir)
-        create_folder(self.output_dir)
+        self.absolute_path = os.getcwd()
+        self.saved_dir, self.output_dir, self.exe_path = self.get_paths()
+        create_folder(self.saved_dir, self.output_dir)
+
+    def get_paths(self):
+        return os.path.join(self.absolute_path, self.data_config.data_saved_path), \
+               os.path.join(self.absolute_path, self.data_config.data_output_path), \
+               os.path.join(self.absolute_path, self.data_config.data_decode_exe_path)
+
+    def get_cmd(self, seq: str) -> str:
+        """
+        :param seq: 当前文件的序号
+        :return: 生成的命令行命令
+        """
+        return self.exe_path + " -b " + os.path.join(self.saved_dir, seq + '.bin') + " -o " + \
+               os.path.join(self.output_dir, seq + '.yuv')
 
     def run(self):
         global con
         while True:
-            self.sk = socket.socket()
+            self.sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sk.connect((self.server_config.ip, self.server_config.port))
             res = str(self.sk.recv(2048).decode(encoding='utf-8'))
             if res == "connected!":
                 print("Connected to server!")
-                self.sk.sendall(bytes("ok".encode(encoding='utf-8')))
+                send_msg_no_recv(self.sk, "ok")
             data, num = bytes(), 0
             info = self.sk.recv(1024).decode(encoding='utf-8')
             print(info)
             if info == "All of the data is sent!":
-                self.sk.sendall(bytes("ok".encode(encoding='utf-8')))
+                send_msg_no_recv(self.sk, "ok")
                 self.sk.close()
                 break
             # 获取到这个字典中的信息
             info = eval(info)
-            self.sk.sendall(bytes("ok".encode(encoding='utf-8')))
-            while num < int(info['length']):
-                data += self.sk.recv(1024)
-                num += 1024
-            self.sk.sendall(bytes("ok".encode(encoding='utf-8')))
+            send_msg_no_recv(self.sk, "ok")
+            while num <= int(info['length']):
+                data += self.sk.recv(4096)
+                num += 4096
+                send_msg_no_recv(self.sk, "ok")
+            print("received:", len(data))
             # 保存为bin文件
             with open(os.path.join(self.saved_dir, str(info['seq']) + '.bin'), 'wb') as f:
                 f.write(data)
             # 解码为yuv文件
-            command = self.exe_path + " -b " + os.path.join(self.saved_dir, str(info['seq']) + '.bin') \
-                      + " -o " + os.path.join(self.output_dir, str(info['seq']) + '.yuv')
+            command = self.get_cmd(str(info['seq']))
             p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE)
             p.communicate()
             con.acquire()
-            # print("socket: acquired", con)
             data_queue.put(info['seq'], os.path.join(self.output_dir, str(info['seq']) + '.yuv'))
             con.notify_all()
-            # print("socket: notified", con)
             con.release()
-            # print("socket: released", con)
 
 
 def main():
@@ -147,6 +158,14 @@ def main():
     global if_trans_finished
     if_trans_finished = True
     decode_thread.join()
+    clean_up()
+
+
+def clean_up():
+    if os.path.exists("./num.csv"):
+        os.remove("./num.csv")
+    if os.path.exists("./dec1.csv"):
+        os.remove("./dec1.csv")
 
 
 if __name__ == "__main__":

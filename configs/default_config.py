@@ -1,7 +1,7 @@
 from .config_client import client_config
 from .config_server import server_config
 from .config_received_data import data_received_config
-from .config_video_utils import video_config
+from .config_video import video_config
 
 
 class DefaultConfig:
