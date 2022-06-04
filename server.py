@@ -34,7 +34,7 @@ class SocketService:
         self.client.sendall(bytes(str(self.video_file_size).encode(encoding='utf-8')))
         self.client.close()
         while True:
-            time.sleep(0.5)
+            time.sleep(2)
             # 等待连接
             print("waiting for connection......")
             self.client, address = self.sk.accept()

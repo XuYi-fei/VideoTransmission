@@ -6,7 +6,6 @@ from utils import DataQueue, FrameDict, SlidingWindow, create_folder
 import subprocess
 import cv2
 import numpy as np
-
 received_num = 0
 
 
@@ -14,7 +13,6 @@ class DataManagement(Thread):
     def __init__(self, size):
         super(DataManagement, self).__init__()
         self.config = Config.data_received_config
-        # 检测存放bin、yuv数据的文件夹是否存在，若不存在就创建
         self.max_received_num = size
 
     def run(self) -> None:
@@ -76,38 +74,38 @@ class SocketService(Thread):
         create_folder(self.saved_dir)
         create_folder(self.output_dir)
         # 初始化socket属性
-        self.sk = socket.socket()
 
     def run(self):
-        self.sk.connect((self.server_config.ip, self.server_config.port))
-        res = str(self.sk.recv(2048).decode(encoding='utf-8'))
-        if res == "connected!":
-            print("Connected to server!")
+        while True:
+            self.sk = socket.socket()
+            self.sk.connect((self.server_config.ip, self.server_config.port))
+            res = str(self.sk.recv(2048).decode(encoding='utf-8'))
+            if res == "connected!":
+                print("Connected to server!")
+                self.sk.sendall(bytes("ok".encode(encoding='utf-8')))
+            data, num = bytes(), 0
+            info = self.sk.recv(1024).decode(encoding='utf-8')
+            print(info)
+            if info == "All of the data is sent!":
+                self.sk.sendall(bytes("ok".encode(encoding='utf-8')))
+                self.sk.close()
+                break
+            # 获取到这个字典中的信息
+            info = eval(info)
             self.sk.sendall(bytes("ok".encode(encoding='utf-8')))
-        data, num = bytes(), 0
-        info = self.sk.recv(1024).decode(encoding='utf-8')
-        print(info)
-        if info == "All of the data is sent!":
+            while num < int(info['length']):
+                data += self.sk.recv(1024)
+                num += 1024
             self.sk.sendall(bytes("ok".encode(encoding='utf-8')))
-            self.sk.close()
-            return
-        # 获取到这个字典中的信息
-        info = eval(info)
-        self.sk.sendall(bytes("ok".encode(encoding='utf-8')))
-        while num < int(info['length']):
-            data += self.sk.recv(1024)
-            num += 1024
-        self.sk.sendall(bytes("ok".encode(encoding='utf-8')))
-        self.sk.close()
-        # 保存为bin文件
-        with open(os.path.join(self.saved_dir, str(info['seq']) + '.bin'), 'wb') as f:
-            f.write(data)
-        # 解码为yuv文件
-        command = self.exe_path + " -b " + os.path.join(self.saved_dir, str(info['seq']) + '.bin') \
-                  + " -o " + os.path.join(self.output_dir, str(info['seq']) + '.yuv')
-        p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE)
-        p.communicate()
-        data_queue.put(info['seq'], os.path.join(self.output_dir, str(info['seq']) + '.yuv'))
+            # 保存为bin文件
+            with open(os.path.join(self.saved_dir, str(info['seq']) + '.bin'), 'wb') as f:
+                f.write(data)
+            # 解码为yuv文件
+            command = self.exe_path + " -b " + os.path.join(self.saved_dir, str(info['seq']) + '.bin') \
+                      + " -o " + os.path.join(self.output_dir, str(info['seq']) + '.yuv')
+            p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE)
+            p.communicate()
+            data_queue.put(info['seq'], os.path.join(self.output_dir, str(info['seq']) + '.yuv'))
 
 
 def main():
@@ -120,28 +118,16 @@ def main():
     res = str(sk.recv(2048).decode(encoding='utf-8'))
     sk.close()
     # 开启DataManagement线程，监听优先队列内的数据
-    decode_thread1 = DataManagement(int(res))
-    decode_thread2 = DataManagement(int(res))
-    decode_thread3 = DataManagement(int(res))
-    decode_thread4 = DataManagement(int(res))
-    decode_thread1.start()
-    decode_thread2.start()
-    decode_thread3.start()
-    decode_thread4.start()
-    # 开启多个线程
-    socket_threads = []
-    for i in range(int(res) + 1):
-        socket_thread = SocketService(Config)
-        socket_thread.start()
-        socket_threads.append(socket_thread)
-    for socket_thread in socket_threads:
-        socket_thread.join()
+    decode_thread = DataManagement(int(res))
+    decode_thread.start()
+    # 开启网络传输线程
+    socket_thread = SocketService(Config)
+    socket_thread.start()
+    socket_thread.join()
+    # 标志传输结束
     global if_trans_finished
     if_trans_finished = True
-    decode_thread1.join()
-    decode_thread2.join()
-    decode_thread3.join()
-    decode_thread4.join()
+    decode_thread.join()
 
 
 if __name__ == "__main__":
