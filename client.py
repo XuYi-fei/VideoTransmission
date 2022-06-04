@@ -2,8 +2,64 @@ import os
 import socket
 from configs import Config, DefaultConfig
 from threading import Thread
-from utils import DataQueue, SlidingWindow
+from utils import DataQueue, FrameDict, SlidingWindow
 import subprocess
+import cv2
+import numpy as np
+
+
+class VideoDecode(Thread):
+    def __init__(self, command, output_dir, data_frame_per_yuv, seq, file_name, width, height):
+        super(VideoDecode, self).__init__()
+        self.output_dir = output_dir
+        self.command = command
+        self.seq = seq
+        self.file_name = file_name
+        self.width = width
+        self.data_frame_per_yuv = data_frame_per_yuv
+        self.height = height
+
+    def run(self) -> None:
+        # p = subprocess.Popen(self.command, shell=True, stdout=subprocess.PIPE)
+        # print(self.command)
+        # p.communicate()
+        self.yuv2bgr(self.seq, os.path.join(self.output_dir, str(self.seq) + '.yuv'), self.width,
+                     self.height)
+
+    def yuv2bgr(self, seq, file_name, width, height, start_frame=0):
+        imgs = []
+        with open(file_name, 'rb') as fp:
+            frame_size = height * width * 3 // 2  # 一帧图像所含的像素个数
+            h_h = height // 2
+            h_w = width // 2
+
+            fp.seek(0, 2)  # 设置文件指针到文件流的尾部
+            ps = fp.tell()  # 当前文件指针位置
+            num_frame = ps // frame_size  # 计算输出帧数
+            fp.seek(frame_size * start_frame, 0)
+            for i in range(num_frame - start_frame):
+                Yt = np.zeros(shape=(height, width), dtype='uint8', order='C')
+                Ut = np.zeros(shape=(h_h, h_w), dtype='uint8', order='C')
+                Vt = np.zeros(shape=(h_h, h_w), dtype='uint8', order='C')
+
+                for m in range(height):
+                    for n in range(width):
+                        Yt[m, n] = ord(fp.read(1))
+                for m in range(h_h):
+                    for n in range(h_w):
+                        Ut[m, n] = ord(fp.read(1))
+                for m in range(h_h):
+                    for n in range(h_w):
+                        Vt[m, n] = ord(fp.read(1))
+
+                img = np.concatenate((Yt.reshape(-1), Vt.reshape(-1), Ut.reshape(-1)))
+                img = img.reshape((height * 3 // 2, width)).astype('uint8')
+                bgr_img = cv2.cvtColor(img, cv2.COLOR_YUV2BGR_YV12)
+                imgs.append(bgr_img)
+
+            for i, img in enumerate(imgs):
+                print(len(frame_dict))
+                frame_dict.put((seq-1) * self.data_frame_per_yuv + i + 1, img)
 
 
 class DataManagement(Thread):
@@ -23,6 +79,7 @@ class DataManagement(Thread):
 
     def run(self) -> None:
         global if_trans_finished
+        decode_threads = []
         while True:
             seq, data = data_queue.get()
             if if_trans_finished and self.received_num >= self.max_received_num:
@@ -32,10 +89,55 @@ class DataManagement(Thread):
             self.received_num += 1
             with open(os.path.join(self.saved_dir, str(seq) + '.bin'), 'wb') as f:
                 f.write(data)
-            frame_queue.put(seq, str(seq) + '.yuv')
             command = self.exe_path + " -b " + os.path.join(self.saved_dir, str(seq) + '.bin') \
                         + " -o " + os.path.join(self.output_dir, str(seq) + '.yuv')
+            decode_thread = VideoDecode(command, self.output_dir, self.config.data_frame_per_yuv, seq,
+                                        os.path.join(self.output_dir, str(seq)+'.yuv'), self.config.data_frame_width, self.config.data_frame_height)
+            decode_thread.start()
+            # decode_threads.append(decode_thread)
+        # for sub_thread in decode_threads:
+        #     sub_thread.start()
             p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE)
+            print(command)
+            p.communicate()
+            # video_info = {"seq": seq, "file_name": os.path.join(self.output_dir, str(seq)+'.yuv'), "width": self.config.data_frame_width,
+            #               "height": self.config.data_frame_height }
+            # frame_dict.put(seq, video_info)
+            # self.yuv2bgr(seq, os.path.join(self.output_dir, str(seq)+'.yuv'), self.config.data_frame_width,
+            #              self.config.data_frame_height)
+
+    def yuv2bgr(self, seq, file_name, width, height, start_frame=0):
+        imgs = []
+        with open(file_name, 'rb') as fp:
+            frame_size = height * width * 3 // 2  # 一帧图像所含的像素个数
+            h_h = height // 2
+            h_w = width // 2
+
+            fp.seek(0, 2)  # 设置文件指针到文件流的尾部
+            ps = fp.tell()  # 当前文件指针位置
+            num_frame = ps // frame_size  # 计算输出帧数
+            fp.seek(frame_size * start_frame, 0)
+            for i in range(num_frame - start_frame):
+                Yt = np.zeros(shape=(height, width), dtype='uint8', order='C')
+                Ut = np.zeros(shape=(h_h, h_w), dtype='uint8', order='C')
+                Vt = np.zeros(shape=(h_h, h_w), dtype='uint8', order='C')
+
+                for m in range(height):
+                    for n in range(width):
+                        Yt[m, n] = ord(fp.read(1))
+                for m in range(h_h):
+                    for n in range(h_w):
+                        Ut[m, n] = ord(fp.read(1))
+                for m in range(h_h):
+                    for n in range(h_w):
+                        Vt[m, n] = ord(fp.read(1))
+
+                img = np.concatenate((Yt.reshape(-1), Vt.reshape(-1), Ut.reshape(-1)))
+                img = img.reshape((height * 3 // 2, width)).astype('uint8')
+                bgr_img = cv2.cvtColor(img, cv2.COLOR_YUV2BGR_YV12)
+                imgs.append(bgr_img)
+            for i, img in enumerate(imgs):
+                frame_dict.put((seq-1) * self.config.data_frame_per_yuv + i + 1, img)
 
 
 class SocketService(Thread):
@@ -72,6 +174,9 @@ class SocketService(Thread):
 
 
 def main():
+    global frame_dict
+    sliding_window = SlidingWindow(frame_dict, Config.video_config)
+    sliding_window.start()
     # 先建立连接，确定接受的数据有多少个文件
     sk = socket.socket()
     sk.connect((Config.server_config.ip, Config.server_config.port))
@@ -95,7 +200,7 @@ def main():
 
 if __name__ == "__main__":
     data_queue = DataQueue()
-    frame_queue = DataQueue()
-    sliding_window = SlidingWindow(frame_queue)
+    frame_dict = FrameDict()
+
     if_trans_finished = False
     main()
