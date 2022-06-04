@@ -34,9 +34,13 @@ class FrameDict:
         self.get_index = 1
         self.lock = threading.Lock()
         self.frame = {}
+        self.start = False
 
     def __len__(self):
         return len(self.frame)
+
+    def if_start(self) -> bool:
+        return self.start or len(self) > 100
 
     def put(self, seq, data):
         self.lock.acquire()

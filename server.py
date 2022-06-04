@@ -1,6 +1,8 @@
 import socket
 import queue
 import os
+import time
+
 from configs import Config, DefaultConfig
 from utils import FilesUtil
 msg_queue = queue.Queue(maxsize=250)
@@ -32,6 +34,7 @@ class SocketService:
         self.client.sendall(bytes(str(self.video_file_size).encode(encoding='utf-8')))
         self.client.close()
         while True:
+            time.sleep(0.5)
             # 等待连接
             print("waiting for connection......")
             self.client, address = self.sk.accept()
@@ -60,9 +63,6 @@ class SocketService:
             # 接收对方的确认消息但是不回复
             self.client.recv(1024).decode(encoding='utf-8')
         print("All of the data is sent!")
-
-    def update_service(self):
-        pass
 
 
 def main():

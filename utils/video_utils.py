@@ -22,7 +22,8 @@ class SlidingWindow(Thread):
                         (self.video_config.video_height // 5, self.video_config.video_width // 2),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1)
             cv2.imshow("video", img)
-            cv2.waitKey(50)
+            cv2.waitKey(30)
+
 
 
 
