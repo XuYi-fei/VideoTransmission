@@ -1,6 +1,6 @@
 import queue
 import threading
-
+from loguru import logger
 
 class DataQueue:
     def __init__(self, size=10):
@@ -43,7 +43,7 @@ class FrameDict:
         self.end = True
 
     def if_end(self) -> bool:
-        return self.end
+        return self.end and self.get_index >= self.next_index
 
     def put(self, seq, data):
         self.lock.acquire()
@@ -56,6 +56,7 @@ class FrameDict:
         self.lock.release()
 
     def get(self):
+        logger.debug("[dict_length]: [%d] | [get_index]: [%d] | [next_index]: [%d]" % (len(self.frame), self.get_index, self.next_index))
         if self.get_index >= self.next_index:
             return None
         self.lock.acquire()

@@ -1,7 +1,6 @@
 from threading import Thread
 import numpy as np
 import cv2
-
 from .DataQueue import FrameDict
 
 
@@ -22,7 +21,7 @@ class SlidingWindow(Thread):
                         (self.video_config.video_height // 5, self.video_config.video_width // 2),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1)
             cv2.imshow("video", img)
-            cv2.waitKey(25)
+            cv2.waitKey(self.video_config.video_image_stop)
             if self.frame_dict.if_end():
                 break
         cv2.waitKey()
