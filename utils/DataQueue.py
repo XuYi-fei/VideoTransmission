@@ -27,3 +27,39 @@ class DataQueue:
         self.current_size -= 1
         return item
 
+
+class FrameDict:
+    def __init__(self):
+        self.next_index = 1
+        self.get_index = 1
+        self.lock = threading.Lock()
+        self.frame = {}
+        self.end = False
+
+    def __len__(self):
+        return len(self.frame)
+
+    def data_end(self):
+        self.end = True
+
+    def if_end(self) -> bool:
+        return self.end
+
+    def put(self, seq, data):
+        self.lock.acquire()
+        self.frame[seq] = data
+        while True:
+            if self.next_index in self.frame:
+                self.next_index += 1
+            else:
+                break
+        self.lock.release()
+
+    def get(self):
+        if self.get_index >= self.next_index:
+            return None
+        self.lock.acquire()
+        item = self.frame[self.get_index]
+        self.get_index += 1
+        self.lock.release()
+        return item

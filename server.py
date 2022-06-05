@@ -1,8 +1,16 @@
-import socket
 import os
-import time
+import socket
+import sys
+
+from loguru import logger
+
 from configs import Config, DefaultConfig
 from utils import FilesUtil, send_bytes, send_msg
+logger.remove()
+logger.add(sys.stdout,
+           format='<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <level>{'
+                  'message}</level>',
+           level=Config.log_config.log_level)
 
 
 class SocketService:
@@ -26,18 +34,19 @@ class SocketService:
     def start(self):
         # seq 标记发送的文件的序号
         seq = 1
-        print("Waiting for a client to connect")
+        logger.info("Waiting to be connected....")
         self.client, address = self.sk.accept()
-        print("Connected, ready to send controlling block")
+        logger.success("|| Connected! Ip address of client is [%s] ||" % address[0])
+        logger.info("Controlling block is sending...")
         self.client.sendall(bytes(str(self.video_file_size).encode(encoding='utf-8')))
         self.client.close()
+        logger.info("Controlling block sent finished!")
         while True:
-            # time.sleep(2)
             # 等待连接
-            print("Waiting for the client to apply for bitstream")
+
             self.client, address = self.sk.accept()
             # 打印连接的客户机地址
-            print("ip is %s" % address[0])
+            logger.debug("Ip address of client is [%s]" % address[0])
             # 获取bin数据
             file_data, length = next(self.bin_files)
             info = {"seq": seq, "length": length}
@@ -50,14 +59,17 @@ class SocketService:
             # 发送控制信息
             send_msg(self.client, str(info))
             seq += 1
-            print("length", info['length'], "actual data length", len(file_data))
+            logger.debug("Data size: [%d] bytes. | Actual data size: [%d] bytes" % (info['length'], len(file_data)))
             # 发送文件
             sent_num = 0
             while sent_num < info['length']:
                 send_bytes(self.client, file_data[sent_num:sent_num+4096])
                 sent_num += 4096
+                logger.info("Sending... | [Already Sent / Data Size]: [%d]/[%d] bytes"
+                            % (sent_num if sent_num < len(file_data) else len(file_data), info['length']))
             # 接收对方的确认消息但是不回复
-        print("All of the data is sent!")
+            logger.success("||                Data No.%d sent.                ||" % (info['seq']))
+        logger.success("||################ Data transmitted! ################||")
         self.sk.close()
 
 

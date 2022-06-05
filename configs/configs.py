@@ -20,3 +20,10 @@ DATA_IMAGE_SIZE = int(DATA_WIDTH * DATA_HEIGHT * 3 / 2)
 
 # 视频播放相关配置
 VIDEO_IMAGE_PER_SECOND = 0.05
+
+# 日志系统相关配置
+LOG_LEVEL = "INFO"
+
+# socket传输相关配置
+SOCKET_BUF_SIZE = 1024
+

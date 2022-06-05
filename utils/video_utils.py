@@ -23,6 +23,9 @@ class SlidingWindow(Thread):
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1)
             cv2.imshow("video", img)
             cv2.waitKey(25)
+            if self.frame_dict.if_end():
+                break
+        cv2.waitKey()
 
 
 def YUV2RGB(Y, U, V, height, width):

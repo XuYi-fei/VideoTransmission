@@ -1,4 +1,5 @@
 import os
+import sys
 import socket
 import threading
 from configs import Config, DefaultConfig
@@ -6,6 +7,12 @@ from threading import Thread
 from utils import DataQueue, FrameDict, SlidingWindow, create_folder, send_msg_no_recv, YUV2RGB
 import subprocess
 import numpy as np
+from loguru import logger
+logger.remove()
+logger.add(sys.stdout,
+           format='<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <level>{'
+                  'message}</level>',
+           level=Config.log_config.log_level)
 
 received_num = 0
 con = threading.Condition()
@@ -16,11 +23,6 @@ class DataManagement(Thread):
         super(DataManagement, self).__init__()
         self.config = Config.data_received_config
         self.max_received_num = size
-        self.h_h, self.h_w = self.config.data_frame_height // 2, self.config.data_frame_width // 2
-        self.Yt = np.zeros(shape=(self.config.data_frame_height, self.config.data_frame_width), dtype='uint8',
-                           order='C')
-        self.Ut = np.zeros(shape=(self.h_h, self.h_w), dtype='uint8', order='C')
-        self.Vt = np.zeros(shape=(self.h_h, self.h_w), dtype='uint8', order='C')
 
     def run(self) -> None:
         global if_trans_finished
@@ -29,7 +31,7 @@ class DataManagement(Thread):
         while True:
             con.acquire()
             seq, data = data_queue.get()
-            if if_trans_finished and received_num >= self.max_received_num:
+            if received_num >= self.max_received_num:
                 con.release()
                 break
             if data is None:
@@ -41,6 +43,12 @@ class DataManagement(Thread):
             self.yuv2bgr(seq, data)
 
     def from_I420(self, yuv_data, frames):
+        """
+        从yuv文件中解析得到Y、U、V分量
+        :param yuv_data:
+        :param frames:
+        :return: Y、U、V分量
+        """
         Y = np.zeros((frames, self.config.data_frame_height, self.config.data_frame_width), dtype=np.uint8)
         U = np.zeros((frames, int(self.config.data_frame_height / 2), int(self.config.data_frame_width / 2)), dtype=np.uint8)
         V = np.zeros((frames, int(self.config.data_frame_height / 2), int(self.config.data_frame_width / 2)), dtype=np.uint8)
@@ -61,6 +69,7 @@ class DataManagement(Thread):
 
     def yuv2bgr(self, seq, file_name):
         """
+        将读入的yuv数据转化为bgr的img存入列表
         :param seq: yuv文件序号
         :param file_name: yuv文件路径
         :return: None
@@ -79,6 +88,9 @@ class DataManagement(Thread):
 
 class SocketService(Thread):
     def __init__(self, config: DefaultConfig):
+        """
+        :param config: 配置变量
+        """
         super(SocketService, self).__init__()
         # 获取需要的配置
         self.client_config = config.client_config
@@ -89,6 +101,9 @@ class SocketService(Thread):
         create_folder(self.saved_dir, self.output_dir)
 
     def get_paths(self):
+        """
+        :return: 获得三个拼接路径——bin文件存储路径、yuv存储路径、解码exe路径
+        """
         return os.path.join(self.absolute_path, self.data_config.data_saved_path), \
                os.path.join(self.absolute_path, self.data_config.data_output_path), \
                os.path.join(self.absolute_path, self.data_config.data_decode_exe_path)
@@ -103,28 +118,34 @@ class SocketService(Thread):
 
     def run(self):
         global con
+        logger.success("||############   Video transmit begin.    ############||")
         while True:
             self.sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sk.connect((self.server_config.ip, self.server_config.port))
             res = str(self.sk.recv(2048).decode(encoding='utf-8'))
             if res == "connected!":
-                print("Connected to server!")
                 send_msg_no_recv(self.sk, "ok")
             data, num = bytes(), 0
             info = self.sk.recv(1024).decode(encoding='utf-8')
-            print(info)
             if info == "All of the data is sent!":
+                logger.success("||##########   Video transmitted over.      ##########||")
                 send_msg_no_recv(self.sk, "ok")
+                frame_dict.data_end()
                 self.sk.close()
                 break
-            # 获取到这个字典中的信息
             info = eval(info)
+            logger.success("|| Connected to the server. Begin to receive packets. ||")
+            logger.info("Info of data to receive:")
+            logger.info("[Seq]: [No.%d] | [Data Size]: [%d] bytes" % (info['seq'], info['length']) )
+            # 获取到这个字典中的信息
             send_msg_no_recv(self.sk, "ok")
             while num <= int(info['length']):
                 data += self.sk.recv(4096)
                 num += 4096
                 send_msg_no_recv(self.sk, "ok")
-            print("received:", len(data))
+                logger.info("Transmitting... | [Seq]: [No.%d] | [Received Size / Data Size]: [%d]/[%d] bytes"
+                            % (info['seq'],  len(data), info['length']))
+            logger.success("----     Bitstream received. Closing the socket     ----")
             # 保存为bin文件
             with open(os.path.join(self.saved_dir, str(info['seq']) + '.bin'), 'wb') as f:
                 f.write(data)
@@ -155,8 +176,6 @@ def main():
     socket_thread.start()
     socket_thread.join()
     # 标志传输结束
-    global if_trans_finished
-    if_trans_finished = True
     decode_thread.join()
     clean_up()
 
