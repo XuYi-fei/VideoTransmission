@@ -1,6 +1,48 @@
-# 多媒体技术实验报告
 
-> **班级：** 提高1901班	**姓名：**许逸飞	**学号：**U201915709	**日期：**2022.6
+
+<img src="imgs/image-20220608234153864.png" style="width:300px;float:left"></img>
+
+
+
+<center style="font-size:50px"><strong>华中科技大学</strong></center>
+
+
+
+
+
+
+
+<center style="font-size:40px"><strong>多媒体技术实验报告</strong></center>
+
+
+
+
+
+
+
+
+
+
+
+<center style="font-size:20px"><strong>班级：<u>电信提高1901班</u></strong></center>
+
+<center style="font-size:20px"><strong>姓名：  <u>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;许逸飞&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</u></strong></center>
+
+<center style="font-size:20px"><strong>学号：  <u>&nbsp;U201915709&nbsp;&nbsp;&nbsp;&nbsp;</u></strong></center>
+
+<center style="font-size:20px"><strong>日期：<u>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2022.6&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</u></strong></center>
+
+
+
+
+
+
+
+
+
+
+
+
 
 ## 实验一：实现运动估计、补偿算法
 
