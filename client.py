@@ -20,6 +20,9 @@ con = threading.Condition()
 
 class DataManagement(Thread):
     def __init__(self, size):
+        """
+        :param size: 此次视频传输的视频段数量
+        """
         super(DataManagement, self).__init__()
         self.config = Config.data_received_config
         self.max_received_num = size
@@ -40,7 +43,9 @@ class DataManagement(Thread):
                 continue
             received_num += 1
             con.release()
+            logger.success("||###  Decoding frame No.%d      ###||" % seq)
             self.yuv2bgr(seq, data)
+            logger.success("||###  Decoding No.%d finished   ###||" % seq)
 
     def from_I420(self, yuv_data, frames):
         """
@@ -82,6 +87,7 @@ class DataManagement(Thread):
             bgr_data = YUV2RGB(Y[frame_idx, :, :], U[frame_idx, :, :], V[frame_idx, :, :], self.config.data_frame_height, self.config.data_frame_width)           # numpy
             if bgr_data is not None:
                 imgs.append(bgr_data)
+        # 放入字典中
         for i, img in enumerate(imgs):
             frame_dict.put((seq - 1) * self.config.data_frame_per_yuv + i + 1, img)
 
@@ -118,7 +124,7 @@ class SocketService(Thread):
 
     def run(self):
         global con
-        logger.success("||############   Video transmit begin.    ############||")
+        logger.success("||###  Video transmit begin.    ###||")
         while True:
             self.sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sk.connect((self.server_config.ip, self.server_config.port))
@@ -126,26 +132,28 @@ class SocketService(Thread):
             if res == "connected!":
                 send_msg_no_recv(self.sk, "ok")
             data, num = bytes(), 0
+            # 获取控制信息
             info = self.sk.recv(1024).decode(encoding='utf-8')
             if info == "All of the data is sent!":
-                logger.success("||##########   Video transmitted over.      ##########||")
+                logger.success("||###  Video transmitted over.    ###||")
                 send_msg_no_recv(self.sk, "ok")
                 frame_dict.data_end()
                 self.sk.close()
                 break
             info = eval(info)
-            logger.success("|| Connected to the server. Begin to receive packets. ||")
+            logger.success("||---  Connected! Receiving.... ---||")
             logger.info("Info of data to receive:")
             logger.info("[Seq]: [No.%d] | [Data Size]: [%d] bytes" % (info['seq'], info['length']) )
-            # 获取到这个字典中的信息
+
             send_msg_no_recv(self.sk, "ok")
+            # 接受视频段
             while num <= int(info['length']):
                 data += self.sk.recv(4096)
                 num += 4096
                 send_msg_no_recv(self.sk, "ok")
                 logger.info("Transmitting... | [Seq]: [No.%d] | [Received Size / Data Size]: [%d]/[%d] bytes"
                             % (info['seq'],  len(data), info['length']))
-            logger.success("----     Bitstream received. Closing the socket     ----")
+            logger.success("||---  Bitstream received....   ---||")
             # 保存为bin文件
             with open(os.path.join(self.saved_dir, str(info['seq']) + '.bin'), 'wb') as f:
                 f.write(data)
@@ -153,16 +161,18 @@ class SocketService(Thread):
             command = self.get_cmd(str(info['seq']))
             p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE)
             p.communicate()
+            # 互斥访问队列
             con.acquire()
             data_queue.put(info['seq'], os.path.join(self.output_dir, str(info['seq']) + '.yuv'))
+            # 唤醒被阻塞的线程
             con.notify_all()
             con.release()
 
 
 def main():
     global frame_dict
-    sliding_window = SlidingWindow(frame_dict, Config.video_config)
-    sliding_window.start()
+    display_thread = SlidingWindow(frame_dict, Config.video_config)
+    display_thread.start()
     # 先建立连接，确定接受的数据有多少个文件
     sk = socket.socket()
     sk.connect((Config.server_config.ip, Config.server_config.port))
@@ -177,6 +187,7 @@ def main():
     socket_thread.join()
     # 标志传输结束
     decode_thread.join()
+    display_thread.join()
     clean_up()
 
 
@@ -190,5 +201,4 @@ def clean_up():
 if __name__ == "__main__":
     data_queue = DataQueue()
     frame_dict = FrameDict()
-    if_trans_finished = False
     main()
